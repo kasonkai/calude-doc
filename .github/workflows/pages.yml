@@ -1,0 +1,48 @@
+name: Deploy to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create upload
+        id: upload
+        run: |
+          TAG="${{ github.run_id }}-${{ github.run_attempt }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+          tar -czf artifact.tar.gz --exclude=.git --exclude=.github .
+          RESP=$(curl -s -X POST \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${{ github.repository }}/pages/deployments" \
+            -d "{\"artifact_url\":\"file://unused\",\"pages_build_version\":\"$TAG\",\"oidc_token\":\"unused\"}")
+
+          DEPLOY_ID=$(echo "$RESP" | sed -n 's/.*"id": *\([0-9]*\).*/\1/p')
+          echo "deploy_id=$DEPLOY_ID" >> "$GITHUB_OUTPUT"
+
+          curl -s -X POST \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Content-Type: application/octet-stream" \
+            "https://api.github.com/repos/${{ github.repository }}/pages/deployments/$DEPLOY_ID/archives?archive_format=tgz" \
+            --data-binary @artifact.tar.gz
+
+          echo "page_url=https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/" >> "$GITHUB_OUTPUT"
+
+      - name: Result
+        id: deploy
+        run: echo "page_url=https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/" >> "$GITHUB_OUTPUT"
